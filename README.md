@@ -11,9 +11,10 @@ For Windows: https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/get-s
 For Linux or MacOS: https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/get-started/linux-macos-setup.html
 
 2- Test IDF with `idf.py --version` to check if it is installed and configured correctly.
+<img width="539" height="215" alt="image" src="https://github.com/user-attachments/assets/ed95e767-9451-4e03-ab85-f83e08a2f936" />
+
  
 3- Clone the repository with the Arduino as IDF Component project.
-
 
 4- Open an IDF terminal and execute `idf.py set-target esp32c6`
 
