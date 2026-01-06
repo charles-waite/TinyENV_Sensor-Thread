@@ -3,4 +3,4 @@ dependencies:
     version: "^1.4.0"
     require: public
   espressif/arduino-esp32:
-    version: "3.3.0"
+    version: "3.3.5"

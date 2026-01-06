@@ -90,7 +90,14 @@ void setup() {
   pinMode(ledPin, OUTPUT);
 
   Serial.begin(115200);
+  #include "esp_log.h"
+  static const char *TAG = "APP";
 
+  Serial.println(">>> HELLO FROM ARDUINO SERIAL <<<");
+  Serial.printf(">>> Serial.printf works: %d <<<\r\n", 123);
+  ESP_LOGE(TAG, ">>> HELLO FROM ESP_LOGE <<<");
+  ESP_LOGI(TAG, ">>> HELLO FROM ESP_LOGI <<<");
+  
 // CONFIG_ENABLE_CHIPOBLE is enabled when BLE is used to commission the Matter Network
 #if !CONFIG_ENABLE_CHIPOBLE
   // We start by connecting to a WiFi network

@@ -9,6 +9,7 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 #    -DCHIP_HAVE_CONFIG_H)
 #list(APPEND compile_definitions "CHIP_HAVE_CONFIG_H=1")
 #list(APPEND compile_definitions "CHIP_ADDRESS_RESOLVE_IMPL_INCLUDE_HEADER=<lib/address_resolve/AddressResolve_DefaultImpl.h>")
+add_compile_definitions(ARDUINO_USB_MODE=1 ARDUINO_USB_CDC_ON_BOOT=1)
 
 project(Matter_C6_Thread_Light)
 

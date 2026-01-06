@@ -1,0 +1,4 @@
+.DS_Store
+build/*
+managed_components/*
+*.lock
