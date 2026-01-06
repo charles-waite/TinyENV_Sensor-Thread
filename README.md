@@ -1,25 +1,148 @@
-# Arduino ESP-Matter over Thread example using ESP32-C6
-This is an Arduino as IDF Project to build an ESP-Matter over Thread RGB Light using ESP32-C6 and ESP-Matter Arduino API \
-The example requires IDF 5.5.0 and ESP32 Arduino Core 3.0.0
+# TinyENV Sensor – Matter over Thread (ESP32‑C6)
 
-# Instructions:
+A headless, battery‑powered temperature & humidity sensor built on **Seeed XIAO ESP32‑C6**, using **Matter over Thread**. Works with **Home Assistant** and **Apple Home**.
 
-1- Install IDF 5.5.0 into your computer. It can be done following the guide in
-https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/get-started/index.html
+This project is intentionally minimal: no screen, no buttons beyond BOOT for decommissioning, and no OTA (for now). The goal is a stable, low‑power environmental sensor using a modern Matter/Thread stack.
 
-For Windows: https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/get-started/index.html \
-For Linux or MacOS: https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/get-started/linux-macos-setup.html
+---
 
-2- Test IDF with `idf.py --version` to check if it is installed and configured correctly.
-<img width="539" height="215" alt="image" src="https://github.com/user-attachments/assets/ed95e767-9451-4e03-ab85-f83e08a2f936" />
+## Hardware
 
-3- Clone the repository with the Arduino as IDF Component project.
-`git clone https://github.com/SuGlider/Arduino_ESP-Matter-over-Thread_ESP32-C6`
+- **MCU**: Seeed XIAO ESP32‑C6
+- **Sensor**: Sensirion SHT41 (I²C)
+- **Power**: Single‑cell Li‑ion (USB during development)
+- **Battery sense**: A0 via 1:2 divider (calibrated in firmware)
 
-4- Open an IDF terminal and execute `idf.py set-target esp32c6`
+I²C pins (explicitly defined, not relying on Arduino board defaults):
 
-5- Execute `idf.py -p <your COM or /dev/tty port connected to the ESP32-C6> flash monitor`
+```cpp
+#define SDA_PIN 22
+#define SCL_PIN 23
+```
 
-6- It will build, upload and show the UART0 output in the screen.
+---
 
-7- Try to add the Matter RGB light to your Matter environment.
+## Software Stack
+
+- **ESP‑IDF**: v5.5.x
+- **Arduino Core**: arduino‑esp32 3.3.x (as ESP‑IDF component)
+- **Matter**: esp‑matter + Arduino Matter wrappers
+- **Transport**: Thread (IEEE 802.15.4)
+- **Sensor driver**: Adafruit\_SHT4x (temporary; may be replaced later)
+
+---
+
+## Project Structure (important bits)
+
+```text
+TinyENV_Sensor-Thread/
+├── CMakeLists.txt          # Top-level (sets Arduino USB CDC flags)
+├── sdkconfig / defaults
+├── partitions.csv
+├── main/
+│   ├── TinyENV_Thread.cpp  # Main application (renamed from example)
+│   ├── CMakeLists.txt
+│   ├── MatterEndpoints/
+│   │   ├── MatterTemperatureSensorBattery.h
+│   │   └── MatterTemperatureSensorBattery.cpp
+└── managed_components/
+```
+
+### Custom Matter Endpoint
+
+A custom endpoint (`MatterTemperatureSensorBattery`) extends the standard Matter temperature sensor to also expose **battery voltage and percentage**. This is a local shim, not a published library.
+
+---
+
+## What Changed From the Original Example
+
+- Replaced example **Color Light** with:
+  - Temperature Sensor cluster
+  - Humidity Sensor cluster
+  - Battery reporting
+- Switched transport to **Matter over Thread** (no Wi‑Fi required at runtime)
+- Explicit USB CDC configuration so `Serial.print()` works reliably
+- Explicit I²C pin configuration for XIAO ESP32‑C6
+- Headless commissioning (QR + manual code via serial)
+- Added power‑saving features (CPU scaling + light sleep)
+
+---
+
+## One‑Time ESP‑IDF Setup
+
+Clone ESP‑IDF and install tools (once per machine):
+
+```bash
+git clone -b v5.5 https://github.com/espressif/esp-idf.git ~/esp-idf
+cd ~/esp-idf
+./install.sh
+```
+
+Add a shell alias (recommended):
+
+```bash
+alias espidf-init='. $HOME/esp-idf/export.sh'
+```
+
+---
+
+## Build & Flash Instructions
+
+From the project root:
+
+```bash
+espidf-init
+idf.py set-target esp32c6
+idf.py fullclean
+idf.py build
+idf.py -p /dev/cu.usbmodemXXXX erase-flash flash monitor
+```
+
+> ⚠️ Use `/dev/cu.*`, **not** `/dev/tty.*` on macOS.
+
+---
+
+## Commissioning
+
+On first boot (or after erase/decommission), the device prints:
+
+- Manual pairing code
+- QR code URL
+
+Use either **Home Assistant** or **Apple Home** to commission. The same firmware works in both ecosystems.
+
+BOOT button held for **>5 seconds** will decommission the node.
+
+---
+
+## Runtime Behavior
+
+- Sensor polling interval: **120 seconds** (production setting)
+- Updates temperature, humidity, and battery over Matter
+- Designed to run unattended on battery
+
+Example serial output:
+
+```text
+Updated: 72.8 F, 55 %RH, VBAT: 4.12V (93%)
+```
+
+---
+
+## OTA
+
+OTA is intentionally **not enabled**:
+
+- Dual OTA partitions are not configured
+- Matter OTA over Thread is not practical yet on ESP32
+
+This can be revisited later if needed.
+
+---
+
+## Status
+
+✅ Builds cleanly on ESP‑IDF 5.5 ✅ Works with Home Assistant ✅ Works with Apple Home ✅ Matter over Thread confirmed
+
+This is a stable baseline. Future work will focus on power optimization and optional sensor expansion.
+

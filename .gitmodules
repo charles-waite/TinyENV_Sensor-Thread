@@ -1,0 +1,9 @@
+[submodule "components/Adafruit_BusIO"]
+	path = components/Adafruit_BusIO
+	url = https://github.com/adafruit/Adafruit_BusIO.git
+[submodule "components/Adafruit_SHT4X"]
+	path = components/Adafruit_SHT4X
+	url = https://github.com/adafruit/Adafruit_SHT4X.git
+[submodule "Adafruit_Sensor"]
+	path = Adafruit_Sensor
+	url = https://github.com/adafruit/Adafruit_Sensor
