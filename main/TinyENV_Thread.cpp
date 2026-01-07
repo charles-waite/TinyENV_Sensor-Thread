@@ -25,10 +25,15 @@
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
 #include <MatterEndpoints/MatterTemperatureSensorBattery.h>
+#include "esp_openthread.h"
+#include <openthread/link.h>
 #if !CONFIG_ENABLE_CHIPOBLE
 // if the device can be commissioned using BLE, WiFi is not used - save flash space
 #include <WiFi.h>
 #endif
+
+/* =========== Debug Mode Switch ========*/
+static constexpr bool DEBUG_SERIAL = false;
 
 // ------------ Board Pin Defs -----------------
 #define SDA_PIN 22
@@ -55,7 +60,7 @@ Adafruit_SHT4x sht4;
 bool sht_ready = false;
 
 // ---------- Timers ----------
-const uint32_t SENSOR_UPDATE_MS = 120000; // 10s: sensor + Matter update
+const uint32_t SENSOR_UPDATE_MS = 120000; // 2min: sensor + Matter update
 uint32_t last_sensor_ms = 0;
 
 // ---------- Cached readings ----------
@@ -78,9 +83,9 @@ static inline float readBatteryVoltsA0() {
   float pin_mv = (mv / 16.0f);
   float vA0    = pin_mv / 1000.0f;            // volts at VBAT_ADC_PIN
   float vbat   = (vA0 * 2.0f) * VBAT_GAIN;    // undo 1:2 divider, then apply calibration
-  Serial.printf("VBAT_ADC pin avg: %.1f mV | v_pin=%.3f V | vbat=%.3f V\r\n",
-                pin_mv, vA0, vbat);
-
+  if (DEBUG_SERIAL) {
+    Serial.printf("VBAT_ADC pin avg: %.1f mV | v_pin=%.3f V | vbat=%.3f V\r\n",pin_mv, vA0, vbat);
+  }
   return vbat;
 }
 
@@ -130,31 +135,38 @@ bool read_sht41(float &tempC, float &rh) {
 // -------- Sensor Update Function---------
 static void sensorUpdate() {
   float tC, rh;
+
   if (read_sht41(tC, rh)) {
     g_lastTempC = tC;
     g_lastRH    = rh;
-    float vbat = readBatteryVoltsA0();
+
+    float vbat   = readBatteryVoltsA0();
     uint8_t bpct = voltsToPct(vbat);
 
     TempSensor.setTemperature(tC);
+
     uint32_t mv_to_matter = (uint32_t) lroundf(vbat * 1000.0f);
-    Serial.printf("Matter write batt: %lu mV\r\n", (unsigned long)mv_to_matter);
     TempSensor.setBatteryVoltageMv(mv_to_matter);
     TempSensor.setBatteryPercent(bpct);
+
     HumiditySensor.setHumidity(rh);
 
-    Serial.print("Sensor update: ");
-    Serial.print(C_to_F(tC), 1);
-    Serial.print(" F, ");
-    Serial.print(rh, 0);
-    Serial.print(" %RH, ");
-    Serial.print(" VBAT: ");
-    Serial.print(vbat, 3);
-    Serial.print("V (");
-    Serial.print(bpct);
-    Serial.println("%)");
+    if (DEBUG_SERIAL) {
+      Serial.print("Sensor update: ");
+      Serial.print(C_to_F(tC), 1);
+      Serial.print(" F, ");
+      Serial.print(rh, 0);
+      Serial.print(" %RH, ");
+      Serial.print(" VBAT: ");
+      Serial.print(vbat, 3);
+      Serial.print("V (");
+      Serial.print(bpct);
+      Serial.println("%)");
+    }
   } else {
-    Serial.println("Initial SHT41 read failed.");
+    if (DEBUG_SERIAL) {
+      Serial.println("SHT41 sensor read failed.");
+    }
   }
 }
 
@@ -200,6 +212,13 @@ void setup() {
     Serial.println("Device already commissioned.");
   }
 
+  /* ============ Set Thread Polling Interval ======= */
+  otInstance *ot = esp_openthread_get_instance();
+  if (ot) {
+    otLinkSetPollPeriod(ot, 5000); // 5s to start; try 10s if you can tolerate latency
+    Serial.println("Set OT poll period to 10000ms");
+  }
+
   /* ==== Power Saving Features Enable ==== */
   setCpuFrequencyMhz(80);     // Reduce CPU freq (optional but usually helpful)
 
@@ -209,8 +228,25 @@ void setup() {
     .light_sleep_enable = true
   };
   esp_pm_configure(&pm);
-  Serial.println("Initial Sensor Read");
-  sensorUpdate();
+
+  /* ======== Initial Power-on sensor update =====*/
+  sensorUpdate(); // 
+  if (read_sht41(tC, rh)) {
+    Serial.println("Initial Sensor Read");
+    Serial.print("Sensor update: ");
+    Serial.print(C_to_F(tC), 1);
+    Serial.print(" F, ");
+    Serial.print(rh, 0);
+    Serial.print(" %RH, ");
+    Serial.print(" VBAT: ");
+    Serial.print(vbat, 3);
+    Serial.print("V (");
+    Serial.print(bpct);
+    Serial.println("%)");
+  } 
+  else {
+    Serial.println("SHT41 sensor read failed.");
+  }
   last_sensor_ms = millis();
 }
 
@@ -240,6 +276,6 @@ void loop() {
     pressed = false;
     press_ts = now;
   }
-  vTaskDelay(pdMS_TO_TICKS(50));
+  vTaskDelay(pdMS_TO_TICKS(1000));
 
 }
