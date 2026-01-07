@@ -30,9 +30,10 @@
 #include <WiFi.h>
 #endif
 
-// --------------- I2C Pins -----------------
+// ------------ Board Pin Defs -----------------
 #define SDA_PIN 22
 #define SCL_PIN 23
+#define VBAT_ADC_PIN A0   // GPIO0 (XIAO ESP32-C6 A0)
 
 // ----------- Matter Endpoints -------------
 MatterTemperatureSensorBattery TempSensor;      // °C (Matter spec)
@@ -65,26 +66,39 @@ float g_lastRH    = 99.0f;
 static inline float C_to_F(float c) { return (c * 9.0f / 5.0f) + 32.0f; }
 
 // ---------- Battery (A0 via 1:2 divider) ----------
-static constexpr float VBAT_GAIN = 1.082f;  // <-- Battery sense conversion factor (1.082 for my XIAO ESP32-C6 w/ 220,000u resistors)
+static constexpr float VBAT_GAIN = 1.0123f;  // <-- Battery sense conversion factor (1.0123 for my XIAO ESP32-C6 w/ 220,000u resistors)
 
 static inline float readBatteryVoltsA0() {
-  pinMode(A0, INPUT);
   uint32_t mv = 0;
   for (int i = 0; i < 16; i++) {
-    mv += analogReadMilliVolts(A0);
+    uint32_t s = analogReadMilliVolts(VBAT_ADC_PIN);
+    mv += s;
+    delay(2);
   }
-  float vA0 = (mv / 16) / 1000.0f;   // volts at A0
-  return (vA0 * 2.0f) * VBAT_GAIN;                 // undo 1:2 divider, then apply calibration
+  float pin_mv = (mv / 16.0f);
+  float vA0    = pin_mv / 1000.0f;            // volts at VBAT_ADC_PIN
+  float vbat   = (vA0 * 2.0f) * VBAT_GAIN;    // undo 1:2 divider, then apply calibration
+  Serial.printf("VBAT_ADC pin avg: %.1f mV | v_pin=%.3f V | vbat=%.3f V\r\n",
+                pin_mv, vA0, vbat);
+
+  return vbat;
 }
 
 static inline uint8_t voltsToPct(float v) {
-  if (v >= 4.20f) return 100;
-  if (v <= 3.30f) return 0;
+  if (v >= 4.10f) return 100;   // Values above 4.10V registers as 100%
+  if (v <= 3.00f) return 0;     // Values below 3.0 register as 0%
 
-  if (v >= 4.00f) return (uint8_t)(80 + (v - 4.00f) * 100.0f);  // 4.00–4.20 -> 80–100
-  if (v >= 3.80f) return (uint8_t)(40 + (v - 3.80f) * 200.0f);  // 3.80–4.00 -> 40–80
-  if (v >= 3.60f) return (uint8_t)(10 + (v - 3.60f) * 150.0f);  // 3.60–3.80 -> 10–40
-  return (uint8_t)((v - 3.30f) * 33.3f);                         // 3.30–3.60 -> 0–10
+  // 3.90–4.10 -> 80–100  (ΔV=0.20, Δ%=20, slope=100 %/V)
+  if (v >= 3.90f) return (uint8_t)lroundf(80.0f + (v - 3.90f) * 100.0f);
+
+  // 3.60–3.90 -> 40–80   (ΔV=0.30, Δ%=40, slope=133.333... %/V)
+  if (v >= 3.60f) return (uint8_t)lroundf(40.0f + (v - 3.60f) * (40.0f / 0.30f));
+
+  // 3.30–3.60 -> 10–40   (ΔV=0.30, Δ%=30, slope=100 %/V)
+  if (v >= 3.30f) return (uint8_t)lroundf(10.0f + (v - 3.30f) * (30.0f / 0.30f));
+
+  // 3.00–3.30 -> 0–10    (ΔV=0.30, Δ%=10, slope=33.333... %/V)
+  return (uint8_t)lroundf((v - 3.00f) * (10.0f / 0.30f));
 }
 
 // ---------- SHT41 ----------
@@ -113,12 +127,45 @@ bool read_sht41(float &tempC, float &rh) {
   return true;
 }
 
+// -------- Sensor Update Function---------
+static void sensorUpdate() {
+  float tC, rh;
+  if (read_sht41(tC, rh)) {
+    g_lastTempC = tC;
+    g_lastRH    = rh;
+    float vbat = readBatteryVoltsA0();
+    uint8_t bpct = voltsToPct(vbat);
+
+    TempSensor.setTemperature(tC);
+    uint32_t mv_to_matter = (uint32_t) lroundf(vbat * 1000.0f);
+    Serial.printf("Matter write batt: %lu mV\r\n", (unsigned long)mv_to_matter);
+    TempSensor.setBatteryVoltageMv(mv_to_matter);
+    TempSensor.setBatteryPercent(bpct);
+    HumiditySensor.setHumidity(rh);
+
+    Serial.print("Sensor update: ");
+    Serial.print(C_to_F(tC), 1);
+    Serial.print(" F, ");
+    Serial.print(rh, 0);
+    Serial.print(" %RH, ");
+    Serial.print(" VBAT: ");
+    Serial.print(vbat, 3);
+    Serial.print("V (");
+    Serial.print(bpct);
+    Serial.println("%)");
+  } else {
+    Serial.println("Initial SHT41 read failed.");
+  }
+}
+
 void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   Serial.begin(115200);
   delay(200);
 
   Serial.println("\nTiny Room Sensor (headless, Matter + SHT41)");
+  analogReadResolution(12);
+  analogSetPinAttenuation(VBAT_ADC_PIN, ADC_11db);
 
   sensors_init();
 
@@ -162,6 +209,8 @@ void setup() {
     .light_sleep_enable = true
   };
   esp_pm_configure(&pm);
+  Serial.println("Initial Sensor Read");
+  sensorUpdate();
   last_sensor_ms = millis();
 }
 
@@ -171,32 +220,7 @@ void loop() {
   // ---- Periodic sensor read + Matter update ----
   if (now - last_sensor_ms >= SENSOR_UPDATE_MS) {
     last_sensor_ms = now;
-
-    float tC, rh;
-    if (read_sht41(tC, rh)) {
-      g_lastTempC = tC;
-      g_lastRH    = rh;
-      float vbat = readBatteryVoltsA0();
-      uint8_t bpct = voltsToPct(vbat);
-
-      TempSensor.setTemperature(tC);
-      TempSensor.setBatteryVoltageMv((uint32_t)(vbat * 1000.0f));
-      TempSensor.setBatteryPercent(bpct);
-      HumiditySensor.setHumidity(rh);
-
-      Serial.print("Updated: ");
-      Serial.print(C_to_F(tC), 1);
-      Serial.print(" F, ");
-      Serial.print(rh, 0);
-      Serial.print(" %RH, ");
-      Serial.print(" VBAT: ");
-      Serial.print(vbat, 3);
-      Serial.print("V (");
-      Serial.print(bpct);
-      Serial.println("%)");
-    } else {
-      Serial.println("SHT41 read failed.");
-    }
+    sensorUpdate();
   }
     // ---- Decommission (hold BOOT > 5s) ----
   static bool pressed = false;

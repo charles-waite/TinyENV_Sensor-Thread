@@ -111,7 +111,7 @@ bool MatterTemperatureSensorBattery::begin(int16_t _rawTemperature) {
         ps_cluster,
         ::nullable((uint32_t)3854),
         ::nullable((uint32_t)2500),
-        ::nullable((uint32_t)4300)
+        ::nullable((uint32_t)5000)
     );
 
     ps_attr::create_bat_charge_state(ps_cluster, 0);
