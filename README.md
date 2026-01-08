@@ -10,14 +10,15 @@ This project is intentionally minimal: no screen, no buttons beyond BOOT for dec
 
 - **MCU**: Seeed XIAO ESP32‑C6
 - **Sensor**: Sensirion SHT41 (I²C)
-- **Power**: Single‑cell Li‑ion (USB during development)
-- **Battery sense**: A0 via 1:2 divider (calibrated in firmware)
+- **Power**: Supports Battery or USB
+- **Battery sense**: A0 via 1:2 divider (220,000Ω, offset calibrated in firmware to 1.0123)
 
-I²C pins (explicitly defined, not relying on Arduino board defaults):
+Xiao ESP32-C6 board-specific pin definitions:
 
 ```cpp
 #define SDA_PIN 22
 #define SCL_PIN 23
+#define VBAT_ADC_PIN A0
 ```
 
 ---
@@ -28,7 +29,7 @@ I²C pins (explicitly defined, not relying on Arduino board defaults):
 - **Arduino Core**: arduino‑esp32 3.3.x (as ESP‑IDF component)
 - **Matter**: esp‑matter + Arduino Matter wrappers
 - **Transport**: Thread (IEEE 802.15.4)
-- **Sensor driver**: Adafruit\_SHT4x (temporary; may be replaced later)
+- **Sensor driver**: Adafruit SHT4x - https://github.com/adafruit/Adafruit_SHT4X
 
 ---
 
@@ -36,16 +37,27 @@ I²C pins (explicitly defined, not relying on Arduino board defaults):
 
 ```text
 TinyENV_Sensor-Thread/
-├── CMakeLists.txt          # Top-level (sets Arduino USB CDC flags)
-├── sdkconfig / defaults
+├── CMakeLists.txt              # Top-level CMake (ESP-IDF project entry)
+├── sdkconfig
+├── sdkconfig.defaults
+├── sdkconfig.old
+├── dependencies.lock
 ├── partitions.csv
-├── main/
-│   ├── TinyENV_Thread.cpp  # Main application (renamed from example)
-│   ├── CMakeLists.txt
-│   ├── MatterEndpoints/
-│   │   ├── MatterTemperatureSensorBattery.h
-│   │   └── MatterTemperatureSensorBattery.cpp
-└── managed_components/
+├── README.md
+├── components/
+│   ├── Adafruit_SHT4X/         # SHT4x temperature/humidity sensor driver
+│   ├── Adafruit_BusIO/         # Adafruit BusIO dependency
+│   ├── Adafruit_Sensor/        # Adafruit unified sensor base
+│   └── MatterEndpoints/
+│       ├── include/
+│       │   └── MatterEndpoints/
+│       │       └── MatterTemperatureSensorBattery.h
+│       ├── MatterTemperatureSensorBattery.cpp
+│       └── CMakeLists.txt
+└── main/
+    ├── TinyENV_Thread.cpp      # Main application entry point
+    ├── CMakeLists.txt
+    └── idf_component.yml
 ```
 
 ### Custom Matter Endpoint
@@ -117,9 +129,10 @@ BOOT button held for **>5 seconds** will decommission the node.
 
 ## Runtime Behavior
 
-- Sensor polling interval: **120 seconds** (production setting)
-- Updates temperature, humidity, and battery over Matter
-- Designed to run unattended on battery
+- Sensor polling interval: **120 seconds**.
+- Updates temperature, humidity, and battery over Matter over Thread every 2 minutes.
+- Designed to run unattended on battery.
+- Serial output tied to DEBUG_SERIAL bool.
 
 Example serial output:
 
@@ -129,20 +142,13 @@ Updated: 72.8 F, 55 %RH, VBAT: 4.12V (93%)
 
 ---
 
-## OTA
-
-OTA is intentionally **not enabled**:
-
-- Dual OTA partitions are not configured
-- Matter OTA over Thread is not practical yet on ESP32
-
-This can be revisited later if needed.
-
----
 
 ## Status
 
-✅ Builds cleanly on ESP‑IDF 5.5 ✅ Works with Home Assistant ✅ Works with Apple Home ✅ Matter over Thread confirmed
+✅ Builds cleanly on ESP‑IDF 5.5.x.
+✅ Works with Home Assistant.
+✅ Works with Apple Home.
+✅ Matter over Thread confirmed working.
 
 This is a stable baseline. Future work will focus on power optimization and optional sensor expansion.
 
