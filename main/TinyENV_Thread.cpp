@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/* - Tiny Room Sensor (XIAO ESP32-C6) - Headless
- * - Matter over WiFi (Temp°C + Humidity %RH)
- * - Commissioning info via Serial
- * - BOOT hold >5s to decommission
- */
+// ====================================================================== //
+// * - Tiny Room Sensor (XIAO ESP32-C6) - Headless
+// * - Matter over Thread (Temp + Humidity via SHT41)
+// * - Commissioning info via Serial
+// * - Hold Boot Button for ~5s to decommission
+// * - Optimized for battery power and low current draw
+// ====================================================================== // 
 
-// Matter Manager
 #include <Matter.h>
 #include <MatterEndPoint.h>
 #include "esp_pm.h"
@@ -27,12 +28,22 @@
 #include <MatterEndpoints/MatterTemperatureSensorBattery.h>
 #include "esp_openthread.h"
 #include <openthread/link.h>
-#if !CONFIG_ENABLE_CHIPOBLE
+//#if !CONFIG_ENABLE_CHIPOBLE
 // if the device can be commissioned using BLE, WiFi is not used - save flash space
-#include <WiFi.h>
-#endif
+//#include <WiFi.h>
+//#endif
+#include "esp_sleep.h"
 
-/* =========== Debug Mode Switch ========*/
+/* ========= ESP Sleep Helpers ========= */
+static constexpr uint32_t SLEEP_SECONDS = 60;        // change to taste
+static constexpr uint32_t WAKE_GRACE_MS = 500;       // let packets flush
+static void goToDeepSleepSeconds(uint32_t seconds) {
+  esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);  // convert seconds to MICROseconds (eg. x 1,000,000)
+  delay(WAKE_GRACE_MS);
+  esp_deep_sleep_start();  // never returns
+}
+
+/* =========== Debug Mode Switch ======== */
 static constexpr bool DEBUG_SERIAL = false;
 
 // ------------ Board Pin Defs -----------------
@@ -112,7 +123,7 @@ void sensors_init() {
   Wire.setClock(100000); // conservative for bring-up
 
   if (sht4.begin()) {
-    sht4.setPrecision(SHT4X_HIGH_PRECISION);
+    sht4.setPrecision(SHT4X_MED_PRECISION);
     sht4.setHeater(SHT4X_NO_HEATER);
     sht_ready = true;
     Serial.println("SHT4x detected");
@@ -181,14 +192,6 @@ void setup() {
 
   sensors_init();
 
-  // Seed cache (ok if read fails; defaults remain)
-  float seedC = g_lastTempC;
-  float seedRH = g_lastRH;
-  if (read_sht41(seedC, seedRH)) {
-    g_lastTempC = seedC;
-    g_lastRH    = seedRH;
-  }
-
   // Matter endpoints
   TempSensor.begin(g_lastTempC);   // °C
   HumiditySensor.begin(g_lastRH);
@@ -215,7 +218,7 @@ void setup() {
   /* ============ Set Thread Polling Interval ======= */
   otInstance *ot = esp_openthread_get_instance();
   if (ot) {
-    otLinkSetPollPeriod(ot, 5000); // 5s to start; try 10s if you can tolerate latency
+    otLinkSetPollPeriod(ot, 10000); // 5s to start; try 10s if you can tolerate latency
     Serial.println("Set OT poll period to 10000ms");
   }
 
@@ -231,51 +234,34 @@ void setup() {
 
   /* ======== Initial Power-on sensor update =====*/
   sensorUpdate(); // 
-  if (read_sht41(tC, rh)) {
-    Serial.println("Initial Sensor Read");
-    Serial.print("Sensor update: ");
-    Serial.print(C_to_F(tC), 1);
-    Serial.print(" F, ");
-    Serial.print(rh, 0);
-    Serial.print(" %RH, ");
-    Serial.print(" VBAT: ");
-    Serial.print(vbat, 3);
-    Serial.print("V (");
-    Serial.print(bpct);
-    Serial.println("%)");
-  } 
-  else {
-    Serial.println("SHT41 sensor read failed.");
-  }
+
   last_sensor_ms = millis();
 }
 
 void loop() {
-  const uint32_t now = millis();
-
-  // ---- Periodic sensor read + Matter update ----
-  if (now - last_sensor_ms >= SENSOR_UPDATE_MS) {
-    last_sensor_ms = now;
-    sensorUpdate();
+  const uint32_t now = millis(); 
+  // If not commissioned, stay awake so you can pair.
+  if (!Matter.isDeviceCommissioned()) {
+      // ---- Decommission (hold BOOT > 5s) ----
+    static bool pressed = false;
+    static uint32_t press_ts = 0;
+    bool btn_low = (digitalRead(BUTTON_PIN) == LOW);
+    if (btn_low && !pressed) {
+      pressed = true;
+      press_ts = now;
+    }
+    if (!btn_low && pressed) {
+      pressed = false;
+    }
+    if (pressed && (now - press_ts >= DECOMMISSION_HOLD_MS)) {
+      Serial.println("Decommissioning Matter node...");
+      Matter.decommission();
+      pressed = false;
+      press_ts = now;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+    return;
   }
-    // ---- Decommission (hold BOOT > 5s) ----
-  static bool pressed = false;
-  static uint32_t press_ts = 0;
-
-  bool btn_low = (digitalRead(BUTTON_PIN) == LOW);
-  if (btn_low && !pressed) {
-    pressed = true;
-    press_ts = now;
-  }
-  if (!btn_low && pressed) {
-    pressed = false;
-  }
-  if (pressed && (now - press_ts >= DECOMMISSION_HOLD_MS)) {
-    Serial.println("Decommissioning Matter node...");
-    Matter.decommission();
-    pressed = false;
-    press_ts = now;
-  }
-  vTaskDelay(pdMS_TO_TICKS(1000));
-
+  sensorUpdate();                       //Update sensors
+  goToDeepSleepSeconds(SLEEP_SECONDS);  //Go to sleep
 }
