@@ -152,3 +152,10 @@ Updated: 72.8 F, 55 %RH, VBAT: 4.12V (93%)
 
 This is a stable baseline. Future work will focus on power optimization and optional sensor expansion.
 
+## To-Do
+
+- Build current monitor jig.
+- Reduce power consumption to <10mA. (currently nearly 70mA with 1/7 build)
+- - Verify low power/sleep states are implemented.
+- - Test for and implement sleep modes.
+- Tweak polling
