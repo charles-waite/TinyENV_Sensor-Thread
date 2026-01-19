@@ -28,8 +28,6 @@
 #include <MatterEndpoints/MatterTemperatureSensorBattery.h>
 #include "esp_openthread.h"
 #include <openthread/link.h>
-#include "esp_sleep.h"
-#include "esp_err.h"
 #include <Preferences.h>
 
 #if !CONFIG_ENABLE_CHIPOBLE
@@ -49,14 +47,13 @@ static void blink(uint8_t n);
 static esp_pm_lock_handle_t s_no_ls_lock = nullptr;
 
 static constexpr uint32_t SLEEP_SECONDS = 120;        // NORMAL MODE Refresh interval
-static constexpr uint32_t DEBUG_UPDATE_MS = 5000;     // DEBUG MODE Refresh interval 
+static constexpr uint32_t DEBUG_UPDATE_MS = 5000;     // DEBUG MODE Refresh interval
 static constexpr uint32_t WAKE_GRACE_MS = 500;        // let packets flush
-static constexpr uint32_t COMMISSIONED_AWAKE_UPDATE_MS = 100; // optional
+static constexpr uint32_t ICD_POLL_PERIOD_MS = 60000; // Thread SED poll interval
 
-static void goToDeepSleepSeconds(uint32_t seconds) {
-  esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);  // convert seconds to MICROseconds (eg. x 1,000,000)
+static void idleUntilNextUpdate(uint32_t seconds) {
   delay(WAKE_GRACE_MS);
-  esp_deep_sleep_start();  // never returns
+  vTaskDelay(pdMS_TO_TICKS(seconds * 1000));
 }
 
 /* =========== Debug Mode Switch ======== */
@@ -111,6 +108,23 @@ static void blink(uint8_t n) {
   }
 }
 
+static void configureThreadIcdMode(bool debug) {
+  otInstance *ot = esp_openthread_get_instance();
+  if (!ot) {
+    VPRINTLN("OpenThread instance not ready; ICD config skipped.");
+    return;
+  }
+
+  const bool rx_on_when_idle = debug;
+  otLinkSetRxOnWhenIdle(ot, rx_on_when_idle);
+
+  const uint32_t poll_ms = debug ? 1000 : ICD_POLL_PERIOD_MS;
+  otLinkSetPollPeriod(ot, poll_ms);
+
+  VPRINTF("Thread ICD: rx_on_when_idle=%s, poll=%lu ms\r\n",
+          rx_on_when_idle ? "true" : "false",
+          static_cast<unsigned long>(poll_ms));
+}
 // ---------- DEBUG MODE HELPER --------
 static void loadDebugMode() {
   prefs.begin("tinyenv", false);
@@ -159,6 +173,14 @@ static void handleBootButton() {
       last_toggle_ms = now;
       DEBUG_MODE = !DEBUG_MODE;
       saveDebugMode();
+      configureThreadIcdMode(DEBUG_MODE);
+      if (s_no_ls_lock) {
+        if (DEBUG_MODE) {
+          esp_pm_lock_acquire(s_no_ls_lock);
+        } else {
+          esp_pm_lock_release(s_no_ls_lock);
+        }
+      }
 
       blink(DEBUG_MODE ? 2 : 1);
       Serial.print("DEBUG_MODE: ");
@@ -296,6 +318,7 @@ void setup() {
     esp_pm_lock_acquire(s_no_ls_lock);
   }
   Matter.begin();
+  configureThreadIcdMode(DEBUG_MODE);
   
   // Commission if needed (info via Serial)
   if (!Matter.isDeviceCommissioned()) {
@@ -314,14 +337,6 @@ void setup() {
     Serial.println("Device already commissioned.");
   }
 
-//disabling this for debug
-  /* ============ Set Thread Polling Interval ======= */ 
-/*  otInstance *ot = esp_openthread_get_instance();
-  if (ot) {
-    otLinkSetPollPeriod(ot, 10000); // 10s to start; try 10s if you can tolerate latency
-    Serial.println("Set OT poll period to 10000ms");
-  }
-*/
   /* ==== Power Saving Features Enable ==== */
   setCpuFrequencyMhz(80);     // Reduce CPU freq (optional but usually helpful)
 
@@ -369,9 +384,9 @@ void loop() {
   sensorUpdate();
 
   if (!DEBUG_MODE) {
-    goToDeepSleepSeconds(SLEEP_SECONDS); //TESTING THIS WITHOUT DEEP SLEEP
+    idleUntilNextUpdate(SLEEP_SECONDS);
   } else {
-  vTaskDelay(pdMS_TO_TICKS(DEBUG_UPDATE_MS));
+    vTaskDelay(pdMS_TO_TICKS(DEBUG_UPDATE_MS));
   }
   //TESTING WAKUP TIME
   Serial.println(millis());

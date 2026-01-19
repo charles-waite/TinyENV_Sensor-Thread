@@ -131,6 +131,7 @@ BOOT button held for **>5 seconds** will decommission the node.
 
 - Sensor polling interval: **120 seconds**.
 - Updates temperature, humidity, and battery over Matter over Thread every 2 minutes.
+- Runs as a Thread **ICD sleepy end device** with a 60s poll interval and light sleep between reports.
 - Designed to run unattended on battery.
 - Serial output tied to DEBUG_SERIAL bool.
 
